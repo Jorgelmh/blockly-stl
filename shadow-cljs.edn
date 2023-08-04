@@ -1,0 +1,31 @@
+{:source-paths
+ ["src/main"
+  "src/test"]
+
+ :dependencies
+ [[reagent            "1.0.0"]
+  [org.parkerici/blockoid "0.3.5"]
+  [binaryage/devtools "1.0.2"]]
+
+ :dev-http
+ {3000 "public"}
+
+ :builds
+ {:app
+  {:target     :browser
+   :output-dir "public/js"
+   :asset-path "/js"
+   :infer-externs true
+   :modules    {:main
+                {:init-fn stl-blockly.app.core/main}}}
+
+  :test
+  {:target     :node-test
+   :output-to  "out/node/tests.js"
+   :autorun    true}
+
+  :test-browser
+  {:target     :browser-test
+   :test-dir   "out/browser/test"
+   :devtools   {:http-port 3021
+                :http-root "out/browser/test"}}}}
