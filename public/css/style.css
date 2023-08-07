@@ -28,7 +28,17 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
 }
 
-#blockly-div {
+#root {
   width: 100vw;
   height: 100vh;
+  display: flex;
+  justify-content: space-between;
+}
+
+#blockly-canvas {
+  flex: 1;
+}
+
+#blockly-output {
+  flex: 1;
 }
