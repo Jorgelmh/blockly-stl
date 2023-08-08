@@ -3,7 +3,8 @@
             [clojure.string :as s]
             [org.parkerici.blockoid.core :as bo :refer [workspace]]
             [reagent.core :as r]
-            ["@blockly/field-dependent-dropdown"]))
+            ["@blockly/field-dependent-dropdown"]
+            ["@blockly/block-dynamic-connection"]))
 
 (set! *warn-on-infer* false)
 
@@ -83,8 +84,7 @@
                  :defaultOptions [["None available", "noneAvailable"]]}]
      :output   "Predicate"}))
 
-(def stl-blocks (concat quantifier-blocks
-                        [{:type        "logic_compare"
+(def logical-operations [{:type        "logic_compare"
                           :message0    "%1 %2 %3"
                           :args0        [{:type  "input_value"
                                           :name  "VALUE1"
@@ -97,7 +97,43 @@
                                           :check ["Predicate" "Number"]}]
                           :output       "Boolean"
                           :inputsInline true}
-                         (predicate-block connections model-vars)]))
+                         {:type         "logical_operation"
+                          :message0     "%2 %1 %3"
+                          :args0        [{:type  "input_value"
+                                          :name  "A"
+                                          :check ["Boolean"]}
+                                         {:type    "field_dropdown"
+                                          :name    "OP"
+                                          :options [["and" "AND"]
+                                                    ["or"  "OR"]]}
+                                         {:type  "input_value"
+                                          :name  "B"
+                                          :check ["Boolean"]}]
+                          :output       "Boolean"}
+                         {:type         "implies"
+                          :message0     "Implies %1 => %2"
+                          :args0        [{:type  "input_value"
+                                          :name  "VALUE1"
+                                          :check ["Boolean"]}
+                                         {:type  "input_value"
+                                          :name  "VALUE2"
+                                          :check ["Boolean"]}]
+                          :inputsInline true
+                          :output       "Boolean"}])
+
+(def stl-blocks (concat quantifier-blocks
+                        logical-operations
+                        [(predicate-block connections model-vars)
+                         {:type        "until"
+                          :message0    "%1 U %2"
+                          :args0       [{:type  "input_value"
+                                         :name  "VALUE1"
+                                         :check ["Boolean"]}
+                                        {:type  "input_value"
+                                         :name  "VALUE2"
+                                         :check "Boolean"}]
+                          :output       "Boolean"
+                          :inputsInline true}]))
 
 (defn add-custom-blocks [generator]
   (let [custom-blocks    (map (fn [{:keys [type symbol]}]
@@ -108,15 +144,33 @@
                                            (let [model  (.getFieldValue block "MODEL_SELECTION" 0)
                                                  port   (.getFieldValue block "MODEL_VARIABLE" 0)]
                                              (clj->js [(str model "." port) 0])))
-                                         "logic_compare"
+                                         ("logic_compare" "implies" "until")
                                          (fn [block]
                                            (let [child-1            (.valueToCode generator block "VALUE1" 0)
                                                  child-2            (.valueToCode generator block "VALUE2" 0)
-                                                 dropdown-selection (.getFieldValue block "OPERATOR" 0)
-                                                 operator           ((keyword dropdown-selection) inequility-operators)]
+                                                 operator           (case (.-type block)
+                                                                      "logic_compare"
+                                                                      (->> (.getFieldValue block "OPERATOR" 0)
+                                                                           keyword
+                                                                           (get inequility-operators))
+                                                                      "implies"
+                                                                      "->"
+                                                                      "until"
+                                                                      "U"
+                                                                      "->")]
                                              (clj->js [(str child-1 " " operator " " child-2) 0])))
+                                         "logical_operation"
                                          (fn [block]
-                                           (let [members (-> (.valueToCode generator block "condition" 13))]
+                                           (let [operator         (if (= (.getFieldValue block "OP") "AND") "&" "|")
+                                                 order            (if (= operator "&") 13 14)
+                                                 default-argument (if (= operator "&") "true" "false")
+                                                 block-1          (.valueToCode generator block "A" order)
+                                                 block-2          (.valueToCode generator block "B" order)
+                                                 arg-0            (if (= block-1 "") default-argument block-1)
+                                                 arg-1            (if (= block-2 "") default-argument block-2)]
+                                             (clj->js [(str arg-0 " " operator " " arg-1) 0])))
+                                         (fn [block]
+                                           (let [members (.valueToCode generator block "condition" 0)]
                                              (clj->js [(str symbol " (" members ")") 0]))))})
                               stl-blocks)]
     (loop [remaining-blocks  custom-blocks
@@ -133,19 +187,12 @@
     (aset generator "PRECEDENCE" 0)
     (aset generator "ORDER_OVERRIDES" (clj->js [[13 13]
                                                [14 14]]))
-    (aset (.-forBlock generator) "logic_operation" (fn [block]
-                                                     (let [operator         (if (= (.getFieldValue block "OP") "AND") "&" "|")
-                                                           order            (if (= operator "&") 13 14)
-                                                           default-argument (if (= operator "&") "true" "false")
-                                                           block-1          (.valueToCode generator block "A" order)
-                                                           block-2          (.valueToCode generator block "B" order)
-                                                           arg-0            (if (= block-1 "") default-argument block-1)
-                                                           arg-1            (if (= block-2 "") default-argument block-2)]
-                                                       (clj->js [(str arg-0 " " operator " " arg-1) order]))))
-    (aset (.-forBlock generator) "math_number"     (fn [block]
-                                                     (let [value (.getFieldValue block "NUM" 0)
-                                                           value (if (= value "") 0 value)]
-                                                       (clj->js [(str value) 0]))))
+    (aset (.-forBlock generator) "math_number" (fn [block]
+                                                 (let [value (.getFieldValue block "NUM" 0)
+                                                       value (if (= value "") 0 value)]
+                                                   (clj->js [(str value) 0]))))
+    (aset (.-forBlock generator) "logic_boolean" (fn [block]
+                                                   (clj->js [(s/lower-case (.getFieldValue block "BOOL" 0)) 0])))
     (add-custom-blocks generator)))
 
 (def stl-generator (create-blockly-generator))
@@ -153,8 +200,8 @@
 (def toolbox
   `[:toolbox
     [:category "STL" {}
-     [:block "logic_operation"]
      [:block "math_number"]
+     [:block "logic_boolean"]
      ~@(mapv (fn [block] [:block (:type block)]) stl-blocks)]])
 
 (defn run-code []
